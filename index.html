@@ -747,9 +747,9 @@
                 type: 'raster',
                 tileSize: 256,
                 tiles: [
-                    'https://tiles.stadiamaps.com/tiles/alidade_satellite/{z}/{x}/{y}.jpg?api_key=99ecc044-862a-43a6-ad1e-ce71e5fdb46c'
+                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
                 ],
-                attribution: '© Stadia Maps © OpenMapTiles © OpenStreetMap'
+                attribution: '© Esri, Maxar, Earthstar Geographics'
             });
             map.addLayer({
                 id: 'satellite-layer',
