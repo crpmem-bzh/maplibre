@@ -1,0 +1,1206 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Carte interactive des zones de pêche à pied en Bretagne avec classements sanitaires.">
+    <title>🐚 Pêche à Pied – Bretagne</title>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         DÉPENDANCES EXTERNES
+         ════════════════════════════════════════════════════════════════════ -->
+    
+    <!-- MapLibre GL JS : moteur cartographique (carte, couches, filtres) -->
+    <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    
+    <!-- SheetJS : lecture fichiers Excel lors d'un import délib -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         STYLES CSS
+         ════════════════════════════════════════════════════════════════════
+         Variables + mise en page responsive
+         ════════════════════════════════════════════════════════════════════ -->
+    <style>
+        /* ──────────────────────────────────────────────────────────────────
+           VARIABLES GLOBALES (thème, couleurs, spacing)
+           ────────────────────────────────────────────────────────────────── */
+        :root {
+            /* Couleurs par classement sanitaire */
+            --c-A: #2ECC40;      /* Qualité excellente */
+            --c-B: #FFDC00;      /* Qualité moyenne */
+            --c-C: #FF851B;      /* Qualité médiocre */
+            --c-I: #FF4136;      /* Interdit */
+            --c-EO: #0074D9;     /* Autorisation requise */
+            --c-NC: #AAAAAA;     /* Non classé */
+            --c-P: #EE82EE;      /* Pêche réglementée */
+            
+            /* Thème UI (dark mode) */
+            --ui-bg: rgba(22, 28, 36, 0.96);
+            --ui-border: rgba(255, 255, 255, 0.08);
+            --ui-text: #e8eaf0;
+            --ui-muted: #8a8fa8;
+            --ui-accent: #3d9bff;
+            --ui-radius: 12px;
+            --ui-font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+
+        /* ──────────────────────────────────────────────────────────────────
+           RESET & BASE
+           ────────────────────────────────────────────────────────────────── */
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html, body {
+            height: 100%;
+            font-family: var(--ui-font);
+            overflow: hidden;
+            background: #000;
+        }
+
+        /* ──────────────────────────────────────────────────────────────────
+           CARTE (MapLibre)
+           ────────────────────────────────────────────────────────────────── */
+        #map {
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+        }
+
+        /* ──────────────────────────────────────────────────────────────────
+           PANNEAU FILTRES (droite)
+           ────────────────────────────────────────────────────────────────── */
+        #panel {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 272px;
+            background: var(--ui-bg);
+            border: 1px solid var(--ui-border);
+            border-radius: var(--ui-radius);
+            color: var(--ui-text);
+            font-size: 13px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - 24px);
+            overflow: hidden;
+            backdrop-filter: blur(8px);
+        }
+
+        #panel-header {
+            padding: 11px 14px 9px;
+            border-bottom: 1px solid var(--ui-border);
+            flex-shrink: 0;
+        }
+
+        #panel-header h2 {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--ui-accent);
+        }
+
+        #panel-body {
+            overflow-y: auto;
+            padding: 11px 14px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+        }
+
+        /* ──────────────────────────────────────────────────────────────────
+           GROUPES DE FILTRES
+           ────────────────────────────────────────────────────────────────── */
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .filter-group.hidden {
+            display: none;
+        }
+
+        .filter-group label {
+            display: block;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: var(--ui-muted);
+        }
+
+        .filter-group select {
+            width: 100%;
+            padding: 5px 24px 5px 8px;
+            border-radius: 7px;
+            border: 1px solid var(--ui-border);
+            background: rgba(255, 255, 255, 0.06) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a8fa8'/%3E%3C/svg%3E") no-repeat right 8px center;
+            color: var(--ui-text);
+            font-size: 12px;
+            cursor: pointer;
+            appearance: none;
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            padding-right: 24px;
+        }
+
+        .filter-group select:focus {
+            outline: none;
+            border-color: var(--ui-accent);
+        }
+
+        .filter-group select option {
+            background: #1a2030;
+            color: var(--ui-text);
+        }
+
+        /* ──────────────────────────────────────────────────────────────────
+           SÉPARATEURS
+           ────────────────────────────────────────────────────────────────── */
+        .sep {
+            border: none;
+            border-top: 1px solid var(--ui-border);
+            margin: 1px 0;
+        }
+
+        /* ──────────────────────────────────────────────────────────────────
+           SECTION IMPORT DÉLIBÉRATION
+           ────────────────────────────────────────────────────────────────── */
+        #import-section {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        #import-section .section-title {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: var(--ui-muted);
+        }
+
+        #import-btn {
+            padding: 6px 10px;
+            border-radius: 7px;
+            border: 1px dashed rgba(61, 155, 255, 0.4);
+            background: rgba(61, 155, 255, 0.07);
+            color: var(--ui-accent);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        #import-btn:hover {
+            background: rgba(61, 155, 255, 0.14);
+            border-color: var(--ui-accent);
+        }
+
+        #import-status {
+            font-size: 11px;
+            color: var(--ui-muted);
+            min-height: 14px;
+        }
+
+        #import-file {
+            display: none;
+        }
+
+        /* ──────────────────────────────────────────────────────────────────
+           LÉGENDE (bas-gauche)
+           ────────────────────────────────────────────────────────────────── */
+        #legend {
+            position: absolute;
+            bottom: 12px;
+            left: 10px;
+            width: 252px;
+            background: var(--ui-bg);
+            border: 1px solid var(--ui-border);
+            border-radius: var(--ui-radius);
+            color: var(--ui-text);
+            font-size: 12px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            max-height: 50vh;
+            overflow: hidden;
+            backdrop-filter: blur(8px);
+        }
+
+        #legend-header {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--ui-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        #legend-header span {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: var(--ui-muted);
+        }
+
+        #legend-toggle {
+            background: none;
+            border: none;
+            color: var(--ui-muted);
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        #legend-body {
+            overflow-y: auto;
+            padding: 9px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        #legend.collapsed #legend-body {
+            display: none;
+        }
+
+        .l-item {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+
+        .l-row {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        .l-dot {
+            width: 11px;
+            height: 11px;
+            border-radius: 3px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            flex-shrink: 0;
+        }
+
+        .l-key {
+            font-weight: 700;
+            font-size: 12px;
+        }
+
+        .l-desc {
+            font-size: 10px;
+            color: var(--ui-muted);
+            line-height: 1.4;
+            margin-left: 18px;
+        }
+
+        .l-sep {
+            border: none;
+            border-top: 1px solid var(--ui-border);
+            margin: 2px 0;
+        }
+
+        .l-groups {
+            font-size: 10px;
+            color: var(--ui-muted);
+            line-height: 1.7;
+            list-style: none;
+        }
+
+        .l-groups li::before {
+            content: '· ';
+        }
+
+        /* ──────────────────────────────────────────────────────────────────
+           POPUP SURVOL (MapLibre)
+           ────────────────────────────────────────────────────────────────── */
+        .maplibregl-popup-content {
+            background: rgba(22, 28, 36, 0.97) !important;
+            color: var(--ui-text) !important;
+            border-radius: 10px !important;
+            border: 1px solid var(--ui-border) !important;
+            padding: 11px 13px !important;
+            font-family: var(--ui-font) !important;
+            font-size: 12px !important;
+            min-width: 190px;
+            max-width: 250px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5) !important;
+        }
+
+        .maplibregl-popup-tip {
+            display: none !important;
+        }
+
+        .pu-code {
+            font-size: 10px;
+            color: var(--ui-muted);
+            margin-bottom: 3px;
+        }
+
+        .pu-name {
+            font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 7px;
+        }
+
+        .pu-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: 700;
+            margin-bottom: 7px;
+            color: #111;
+        }
+
+        .pu-sep {
+            border: none;
+            border-top: 1px solid var(--ui-border);
+            margin: 7px 0;
+        }
+
+        .pu-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            padding: 2px 0;
+        }
+
+        .pu-label {
+            color: var(--ui-muted);
+        }
+
+        .pu-val {
+            color: #fff;
+            font-weight: 500;
+            text-align: right;
+            max-width: 60%;
+        }
+
+        /* ──────────────────────────────────────────────────────────────────
+           BOUTON MOBILE (toggle filtres)
+           ────────────────────────────────────────────────────────────────── */
+        #mobile-toggle {
+            display: none;
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 20;
+            background: var(--ui-bg);
+            border: 1px solid var(--ui-border);
+            border-radius: 8px;
+            color: var(--ui-text);
+            padding: 8px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+        }
+
+        /* ──────────────────────────────────────────────────────────────────
+           RESPONSIVE (mobile < 768px)
+           ────────────────────────────────────────────────────────────────── */
+        @media (max-width: 768px) {
+            #mobile-toggle {
+                display: block;
+            }
+
+            #panel {
+                display: none;
+                top: 50px;
+                right: 8px;
+                left: 8px;
+                width: auto;
+                max-height: 60vh;
+            }
+
+            #panel.open {
+                display: flex;
+            }
+
+            #legend {
+                max-height: 35vh;
+                width: 220px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- ════════════════════════════════════════════════════════════════════
+         CONTENEUR CARTE
+         ════════════════════════════════════════════════════════════════════ -->
+    <div id="map"></div>
+    
+    <!-- ════════════════════════════════════════════════════════════════════
+         BOUTON MOBILE (toggle filtres sur petits écrans)
+         ════════════════════════════════════════════════════════════════════ -->
+    <button id="mobile-toggle">☰ Filtres</button>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         PANNEAU FILTRES (droite de la carte)
+         ════════════════════════════════════════════════════════════════════ -->
+    <div id="panel">
+        <div id="panel-header">
+            <h2>Filtres</h2>
+        </div>
+        <div id="panel-body">
+            <!-- ──────────────────────────────────────────────────────────────
+                 FOND DE CARTE
+                 ────────────────────────────────────────────────────────────── -->
+            <div class="filter-group">
+                <label>Fond de carte</label>
+                <select id="fondCarteSelect">
+                    <option value="osm">Classique (OSM)</option>
+                    <option value="satellite">Satellite</option>
+                    <option value="bathy">Bathymétrie</option>
+                </select>
+            </div>
+
+            <hr class="sep">
+
+            <!-- ──────────────────────────────────────────────────────────────
+                 FILTRE DÉPARTEMENT (visible en permanence)
+                 ────────────────────────────────────────────────────────────── -->
+            <div class="filter-group">
+                <label>Département</label>
+                <select id="depFilter">
+                    <option value="all">Tous</option>
+                    <option value="22">Côtes-d'Armor (22)</option>
+                    <option value="29">Finistère (29)</option>
+                    <option value="35">Ille-et-Vilaine (35)</option>
+                    <option value="56">Morbihan (56)</option>
+                </select>
+            </div>
+
+            <!-- ──────────────────────────────────────────────────────────────
+                 FILTRES SECONDAIRES (apparaissent après sélection d'un dept)
+                 ────────────────────────────────────────────────────────────── -->
+            <div class="filter-group hidden" id="fg-espece">
+                <label>Timbre (espèce)</label>
+                <select id="especeFilter">
+                    <option value="all">Toutes</option>
+                </select>
+            </div>
+
+            <div class="filter-group hidden" id="fg-lieu">
+                <label>Lieu de pêche</label>
+                <select id="lieuFilter">
+                    <option value="all">Tous</option>
+                </select>
+            </div>
+
+            <div class="filter-group hidden" id="fg-groupe">
+                <label>Groupe</label>
+                <select id="groupeFilter">
+                    <option value="all">Tous</option>
+                </select>
+            </div>
+
+            <!-- ──────────────────────────────────────────────────────────────
+                 FILTRE CLASSEMENT SANITAIRE (visible en permanence)
+                 ────────────────────────────────────────────────────────────── -->
+            <div class="filter-group">
+                <label>Classement sanitaire</label>
+                <select id="sanFilter">
+                    <option value="all">Tous</option>
+                    <option value="A">A – Qualité excellente</option>
+                    <option value="B">B – Qualité moyenne</option>
+                    <option value="C">C – Qualité médiocre</option>
+                    <option value="EO">EO – Autorisation requise</option>
+                    <option value="I">I – Interdit</option>
+                    <option value="NC">NC – Non classé</option>
+                    <option value="P">P – Pêche réglementée</option>
+                </select>
+            </div>
+
+            <hr class="sep">
+
+            <!-- ──────────────────────────────────────────────────────────────
+                 IMPORT DÉLIBÉRATION (CSV/Excel)
+                 
+                 Permet de charger une nouvelle délibération sans passer par
+                 GitHub. Les Tellines du fichier importé sont IGNORÉES (elles
+                 restent celles du GeoJSON initial).
+                 
+                 Format attendu: Departement,Espece,Lib_zone,Zone,Groupe
+                 ────────────────────────────────────────────────────────────── -->
+            <div id="import-section">
+                <span class="section-title">Mise à jour délibération</span>
+                <button id="import-btn">↑ Importer CSV / Excel</button>
+                <input type="file" id="import-file" accept=".csv,.xlsx,.xls">
+                <div id="import-status">Données depuis GitHub</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         LÉGENDE SANITAIRE (bas-gauche)
+         ════════════════════════════════════════════════════════════════════ -->
+    <div id="legend" class="collapsed">
+        <div id="legend-header">
+            <span>Légende sanitaire</span>
+            <button id="legend-toggle">▸</button>
+        </div>
+        <div id="legend-body">
+            <!-- A -->
+            <div class="l-item">
+                <div class="l-row">
+                    <div class="l-dot" style="background: var(--c-A)"></div>
+                    <span class="l-key">A</span>
+                    <span style="color: var(--ui-muted); font-size: 11px">Qualité excellente</span>
+                </div>
+                <div class="l-desc">Mise sur le marché directe après centre d'expédition agréé.</div>
+            </div>
+
+            <!-- B -->
+            <div class="l-item">
+                <div class="l-row">
+                    <div class="l-dot" style="background: var(--c-B)"></div>
+                    <span class="l-key">B</span>
+                    <span style="color: var(--ui-muted); font-size: 11px">Qualité moyenne</span>
+                </div>
+                <div class="l-desc">Purification ou reparcage obligatoire avant commercialisation.</div>
+            </div>
+
+            <!-- C -->
+            <div class="l-item">
+                <div class="l-row">
+                    <div class="l-dot" style="background: var(--c-C)"></div>
+                    <span class="l-key">C</span>
+                    <span style="color: var(--ui-muted); font-size: 11px">Qualité médiocre</span>
+                </div>
+                <div class="l-desc">Reparcage longue durée ou traitement thermique requis.</div>
+            </div>
+
+            <!-- I -->
+            <div class="l-item">
+                <div class="l-row">
+                    <div class="l-dot" style="background: var(--c-I)"></div>
+                    <span class="l-key">I</span>
+                    <span style="color: var(--ui-muted); font-size: 11px">Interdit</span>
+                </div>
+                <div class="l-desc">Zones portuaires ou polluées. Aucune pêche autorisée.</div>
+            </div>
+
+            <!-- EO -->
+            <div class="l-item">
+                <div class="l-row">
+                    <div class="l-dot" style="background: var(--c-EO)"></div>
+                    <span class="l-key">EO</span>
+                    <span style="color: var(--ui-muted); font-size: 11px">Autorisation requise</span>
+                </div>
+                <div class="l-desc">Arrêté préfectoral spécifique lors de l'exploitation.</div>
+            </div>
+
+            <!-- NC -->
+            <div class="l-item">
+                <div class="l-row">
+                    <div class="l-dot" style="background: var(--c-NC)"></div>
+                    <span class="l-key">NC</span>
+                    <span style="color: var(--ui-muted); font-size: 11px">Non classé</span>
+                </div>
+                <div class="l-desc">Pêche non autorisée sauf pectinidés, gastéropodes, échinodermes.</div>
+            </div>
+
+            <!-- P -->
+            <div class="l-item">
+                <div class="l-row">
+                    <div class="l-dot" style="background: var(--c-P)"></div>
+                    <span class="l-key">P</span>
+                    <span style="color: var(--ui-muted); font-size: 11px">Pêche réglementée</span>
+                </div>
+                <div class="l-desc">Hors obligation de classement sanitaire. Autorisée sauf interdiction contraire.</div>
+            </div>
+
+            <hr class="l-sep">
+
+            <div class="l-desc" style="font-weight: 700; color: var(--ui-text); margin-bottom: 2px">Groupes d'espèces</div>
+            <ul class="l-groups">
+                <li><strong>Gr. 1</strong> Gastéropodes, échinodermes, tuniciers (bulots, oursins…)</li>
+                <li><strong>Gr. 2</strong> Bivalves fouisseurs (palourdes, coques…)</li>
+                <li><strong>Gr. 3</strong> Bivalves non fouisseurs (huîtres, moules…)</li>
+                <li><strong>Gr. –</strong> Hors classement (P)</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         JAVASCRIPT PRINCIPAL
+         ════════════════════════════════════════════════════════════════════ -->
+    <script>
+        // ────────────────────────────────────────────────────────────────────
+        // 1. INITIALISATION
+        // ────────────────────────────────────────────────────────────────────
+        // Charge le GeoJSON depuis /data/PAP_BZH.geojson (généré par Python)
+
+        let GEOJSON = null;
+
+        /**
+         * Charge le GeoJSON depuis /data/
+         * Si le fichier n'existe pas ou erreur, on demande à l'utilisateur
+         * d'importer une délibération.
+         */
+        async function loadGeoJSON() {
+            try {
+                const response = await fetch('./data/PAP_BZH.geojson');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                GEOJSON = await response.json();
+                console.log(`✓ GeoJSON chargé: ${GEOJSON.features.length} features`);
+                return true;
+            } catch (err) {
+                console.error('❌ Erreur chargement GeoJSON:', err);
+                document.getElementById('import-status').textContent =
+                    '⚠ GeoJSON manquant — importe une délibération';
+                return false;
+            }
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // 2. PALETTE DE COULEURS
+        // ────────────────────────────────────────────────────────────────────
+        // Associe chaque classement sanitaire à une couleur
+        const SAN_COLORS = {
+            'A': '#2ECC40',   // Vert
+            'B': '#FFDC00',   // Jaune
+            'C': '#FF851B',   // Orange
+            'I': '#FF4136',   // Rouge
+            'EO': '#0074D9',  // Bleu
+            'NC': '#AAAAAA',  // Gris
+            'P': '#EE82EE',   // Violet
+        };
+
+        /**
+         * Expression MapLibre pour colorier les polygones
+         * selon la propriété "Sanitaire" du GeoJSON
+         * Format: ['match', ['get','property'], val1, color1, val2, color2, ..., defaultColor]
+         */
+        const COLOR_EXPR = [
+            'match', ['get', 'Sanitaire'],
+            'A', '#2ECC40',
+            'B', '#FFDC00',
+            'C', '#FF851B',
+            'I', '#FF4136',
+            'EO', '#0074D9',
+            'NC', '#AAAAAA',
+            'P', '#EE82EE',
+            '#FFFFFF'  // Default (ne devrait pas arriver)
+        ];
+
+        // ────────────────────────────────────────────────────────────────────
+        // 3. INITIALISATION CARTE (MapLibre)
+        // ────────────────────────────────────────────────────────────────────
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: 'https://openmaptiles.geo.data.gouv.fr/styles/osm-bright/style.json',
+            center: [-3.2458, 48.1585],  // Centre Bretagne
+            zoom: window.innerWidth < 768 ? 6.8 : 7.5,
+            minZoom: 6,
+            maxZoom: 16,
+            maxBounds: [[-6.8, 46.8], [-1.2, 49.5]],
+        });
+
+        // Contrôles de navigation et d'échelle
+        map.addControl(new maplibregl.NavigationControl(), 'top-left');
+        map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
+
+        // ────────────────────────────────────────────────────────────────────
+        // 4. CHARGEMENT DES COUCHES (une fois le style chargé)
+        // ────────────────────────────────────────────────────────────────────
+        map.on('load', async () => {
+            // Charger le GeoJSON d'abord
+            const loaded = await loadGeoJSON();
+            if (!loaded) {
+                console.warn('GeoJSON non disponible au démarrage');
+                return;
+            }
+
+            // Ajouter les fonds alternatifs
+            // ─ Satellite
+            map.addSource('satellite', {
+                type: 'raster',
+                tileSize: 256,
+                tiles: [
+                    'https://tiles.stadiamaps.com/tiles/alidade_satellite/{z}/{x}/{y}.jpg?api_key=99ecc044-862a-43a6-ad1e-ce71e5fdb46c'
+                ],
+                attribution: '© Stadia Maps © OpenMapTiles © OpenStreetMap'
+            });
+            map.addLayer({
+                id: 'satellite-layer',
+                type: 'raster',
+                source: 'satellite',
+                layout: { visibility: 'none' }
+            });
+
+            // ─ Bathymétrie (relief sous-marin)
+            map.addSource('bathymetry', {
+                type: 'raster',
+                tileSize: 256,
+                tiles: [
+                    'https://tiles.emodnet-bathymetry.eu/2020/baselayer/web_mercator/{z}/{x}/{y}.png'
+                ],
+                attribution: 'EMODnet Bathymetry'
+            });
+            map.addLayer({
+                id: 'bathymetry-layer',
+                type: 'raster',
+                source: 'bathymetry',
+                layout: { visibility: 'none' }
+            });
+
+            // Ajouter la source principale (zones de pêche)
+            map.addSource('zones', { type: 'geojson', data: GEOJSON });
+
+            // ─ Couche remplissage (fill) avec couleurs par classement
+            map.addLayer({
+                id: 'zones-fill',
+                type: 'fill',
+                source: 'zones',
+                paint: {
+                    'fill-color': COLOR_EXPR,
+                    'fill-opacity': 0.75
+                }
+            });
+
+            // ─ Couche contours (outline) pour bien voir les limites
+            map.addLayer({
+                id: 'zones-outline',
+                type: 'line',
+                source: 'zones',
+                paint: {
+                    'line-color': 'rgba(255, 255, 255, 0.5)',
+                    'line-width': 0.5
+                }
+            });
+
+            // ─ Couche highlight survol (transparente par défaut)
+            map.addLayer({
+                id: 'zones-hover',
+                type: 'fill',
+                source: 'zones',
+                paint: {
+                    'fill-color': 'rgba(255, 255, 255, 0.2)',
+                    'fill-opacity': 0
+                },
+                filter: ['==', 'Zone', '']  // Filtre vide au départ
+            });
+
+            // Peupler les listes déroulantes et appliquer filtres
+            populateOptions();
+            applyFilters();
+        });
+
+        // ────────────────────────────────────────────────────────────────────
+        // 5. POPUP SURVOL (infobulle)
+        // ────────────────────────────────────────────────────────────────────
+        const popup = new maplibregl.Popup({
+            closeButton: false,
+            closeOnClick: false,
+            maxWidth: '260px'
+        });
+        let hoveredZone = null;
+
+        map.on('mousemove', 'zones-fill', (e) => {
+            const f = e.features[0];
+            if (!f) return;
+
+            map.getCanvas().style.cursor = 'pointer';
+
+            // ID unique pour la zone
+            const id = f.properties.Zone + '|' + f.properties.Espece;
+            if (hoveredZone !== id) {
+                hoveredZone = id;
+                // Highlight la zone survolée
+                map.setFilter('zones-hover', [
+                    'all',
+                    ['==', 'Zone', f.properties.Zone],
+                    ['==', 'Espece', f.properties.Espece]
+                ]);
+                map.setPaintProperty('zones-hover', 'fill-opacity', 1);
+            }
+
+            const p = f.properties;
+            const col = SAN_COLORS[p.Sanitaire] || '#fff';
+            // Couleur du texte du badge : dark sur couleurs claires (A, B, P)
+            const textCol = ['A', 'B', 'P'].includes(p.Sanitaire) ? '#111' : '#fff';
+
+            // Textes explicatifs par classement
+            const SAN_LABELS = {
+                'A': 'Qualité excellente',
+                'B': 'Qualité moyenne',
+                'C': 'Qualité médiocre',
+                'I': 'Interdit',
+                'EO': 'Autorisation requise',
+                'NC': 'Non classé',
+                'P': 'Pêche réglementée'
+            };
+
+            // Texte pour le groupe
+            const GROUPE_LABELS = {
+                '1': 'Gr. 1 – Gastéropodes, échinodermes',
+                '2': 'Gr. 2 – Bivalves fouisseurs',
+                '3': 'Gr. 3 – Bivalves non fouisseurs',
+                '-': '– (hors classement DGAL)'
+            };
+
+            popup.setLngLat(e.lngLat).setHTML(`
+                <div class="pu-code">Zone ${p.Zone} · Dép. ${p.Departement}</div>
+                <div class="pu-name">${p.Lib_zone}</div>
+                <div class="pu-badge" style="background: ${col}; color: ${textCol}">
+                    ${p.Sanitaire}
+                    <span style="font-weight: 400; font-size: 10px">
+                        ${SAN_LABELS[p.Sanitaire] || ''}
+                    </span>
+                </div>
+                <hr class="pu-sep">
+                <div class="pu-row">
+                    <span class="pu-label">Espèce (timbre)</span>
+                    <span class="pu-val">${p.Espece}</span>
+                </div>
+                <div class="pu-row">
+                    <span class="pu-label">Groupe</span>
+                    <span class="pu-val">${GROUPE_LABELS[p.Groupe] || p.Groupe}</span>
+                </div>
+            `).addTo(map);
+        });
+
+        map.on('mouseleave', 'zones-fill', () => {
+            map.getCanvas().style.cursor = '';
+            map.setPaintProperty('zones-hover', 'fill-opacity', 0);
+            hoveredZone = null;
+            popup.remove();
+        });
+
+        // ────────────────────────────────────────────────────────────────────
+        // 6. FILTRES DYNAMIQUES
+        // ────────────────────────────────────────────────────────────────────
+        const depEl = document.getElementById('depFilter');
+        const especeEl = document.getElementById('especeFilter');
+        const lieuEl = document.getElementById('lieuFilter');
+        const groupeEl = document.getElementById('groupeFilter');
+        const sanEl = document.getElementById('sanFilter');
+
+        // Zoom sur chaque département
+        const DEP_ZOOM = {
+            22: { center: [-2.75, 48.85], zoom: 8.75 },
+            29: { center: [-4.28, 48.25], zoom: 8.5 },
+            35: { center: [-1.85, 48.58], zoom: 9.75 },
+            56: { center: [-3.05, 47.7], zoom: 8.75 },
+        };
+
+        /**
+         * Peuple les listes déroulantes secondaires (espèce, lieu, groupe)
+         * en fonction du département sélectionné.
+         * Rend ces filtres visibles/invisibles selon le choix.
+         */
+        function populateOptions() {
+            const dep = depEl.value;
+            const especes = new Set();
+            const lieux = new Set();
+            const groupes = new Set();
+
+            // Parcourir le GeoJSON et collecter les valeurs uniques
+            for (const f of GEOJSON.features) {
+                const p = f.properties;
+                // Filtrer par département si sélectionné
+                if (dep !== 'all' && String(p.Departement) !== dep) continue;
+                especes.add(p.Espece);
+                lieux.add(p.Lib_zone);
+                groupes.add(p.Groupe);
+            }
+
+            // Fonction utilitaire pour remplir un select
+            const fill = (el, items) => {
+                const prev = el.value;  // Garder la sélection actuelle si possible
+                el.innerHTML = '<option value="all">Tous</option>';
+                Array.from(items).sort().forEach(v => {
+                    const o = document.createElement('option');
+                    o.value = v;
+                    o.text = v === '-' ? '– (hors classement / P)' : v;
+                    el.appendChild(o);
+                });
+                // Restaurer l'ancienne valeur si elle existe toujours
+                if ([...el.options].find(opt => opt.value === prev)) {
+                    el.value = prev;
+                }
+            };
+
+            fill(especeEl, especes);
+            fill(lieuEl, lieux);
+            fill(groupeEl, groupes);
+
+            // Montrer/masquer les filtres secondaires selon si un dept est sélectionné
+            const show = dep !== 'all';
+            document.getElementById('fg-espece').classList.toggle('hidden', !show);
+            document.getElementById('fg-lieu').classList.toggle('hidden', !show);
+            document.getElementById('fg-groupe').classList.toggle('hidden', !show);
+        }
+
+        /**
+         * Construit et applique le filtre MapLibre
+         * Combine tous les critères sélectionnés (AND logic)
+         */
+        function applyFilters() {
+            if (!map.getLayer('zones-fill')) return;
+
+            const dep = depEl.value;
+            const espece = especeEl.value;
+            const lieu = lieuEl.value;
+            const groupe = groupeEl.value;
+            const san = sanEl.value;
+
+            // Construire l'expression filtre (MapLibre)
+            // Format: ['all', ['condition1'], ['condition2'], ...]
+            const filter = ['all'];
+            if (dep !== 'all') {
+                filter.push(['==', ['get', 'Departement'], parseInt(dep)]);
+            }
+            if (espece !== 'all') {
+                filter.push(['==', ['get', 'Espece'], espece]);
+            }
+            if (lieu !== 'all') {
+                filter.push(['==', ['get', 'Lib_zone'], lieu]);
+            }
+            if (groupe !== 'all') {
+                filter.push(['==', ['get', 'Groupe'], groupe]);
+            }
+            if (san !== 'all') {
+                filter.push(['==', ['get', 'Sanitaire'], san]);
+            }
+
+            // Si aucun filtre = null (affiche tout)
+            const f = filter.length > 1 ? filter : null;
+            map.setFilter('zones-fill', f);
+            map.setFilter('zones-outline', f);
+        }
+
+        // ─ Événements des filtres
+        depEl.addEventListener('change', () => {
+            // Réinitialiser les filtres secondaires
+            especeEl.value = lieuEl.value = groupeEl.value = sanEl.value = 'all';
+            populateOptions();
+            applyFilters();
+            // Zoomer sur le département sélectionné
+            const dep = depEl.value;
+            if (dep === 'all') {
+                map.flyTo({ center: [-3.2458, 48.1585], zoom: 7.5 });
+            } else {
+                const z = DEP_ZOOM[dep];
+                map.flyTo({ center: z.center, zoom: z.zoom });
+            }
+        });
+
+        especeEl.addEventListener('change', applyFilters);
+        lieuEl.addEventListener('change', applyFilters);
+        groupeEl.addEventListener('change', applyFilters);
+        sanEl.addEventListener('change', applyFilters);
+
+        // ────────────────────────────────────────────────────────────────────
+        // 7. FOND DE CARTE
+        // ────────────────────────────────────────────────────────────────────
+        document.getElementById('fondCarteSelect').addEventListener('change', function() {
+            const isSat = this.value === 'satellite';
+            const isBathy = this.value === 'bathy';
+            map.setLayoutProperty('satellite-layer', 'visibility', isSat ? 'visible' : 'none');
+            map.setLayoutProperty('bathymetry-layer', 'visibility', isBathy ? 'visible' : 'none');
+        });
+
+        // ────────────────────────────────────────────────────────────────────
+        // 8. IMPORT DÉLIBÉRATION (CSV/Excel)
+        // ────────────────────────────────────────────────────────────────────
+        // Permet l'import local d'une nouvelle délibération sans passer par GitHub.
+        // Les Tellines du GeoJSON sont PRÉSERVÉES (pas écrasées par l'import).
+
+        // Sauvegarder les Tellines originales (pour ne pas les écraser)
+        const TELLINES_ORIG = GEOJSON ? GEOJSON.features.filter(f => f.properties.Espece === 'Tellines') : [];
+
+        document.getElementById('import-btn').addEventListener('click', () => {
+            document.getElementById('import-file').click();
+        });
+
+        document.getElementById('import-file').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            document.getElementById('import-status').textContent = 'Lecture…';
+            const ext = file.name.split('.').pop().toLowerCase();
+            const reader = new FileReader();
+
+            if (ext === 'csv') {
+                // ─ CSV
+                reader.onload = ev => {
+                    applyImport(parseCSV(ev.target.result), file.name);
+                };
+                reader.readAsText(file, 'UTF-8');
+            } else if (['xlsx', 'xls'].includes(ext)) {
+                // ─ Excel (via SheetJS)
+                reader.onload = ev => {
+                    const wb = XLSX.read(ev.target.result, { type: 'array' });
+                    const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {
+                        defval: ''
+                    });
+                    applyImport(data, file.name);
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                document.getElementById('import-status').textContent = '⚠ Format non supporté';
+            }
+            this.value = '';
+        });
+
+        /**
+         * Parse un CSV brut en tableau d'objets
+         * Gère les guillemets et délimiteurs correctement
+         */
+        function parseCSV(text) {
+            text = text.replace(/^\uFEFF/, '');  // Supprimer BOM
+            const lines = text.split(/\r?\n/).filter(l => l.trim());
+            const headers = splitLine(lines[0]).map(h => h.trim());
+            return lines.slice(1).map(l => {
+                const vals = splitLine(l);
+                const obj = {};
+                headers.forEach((h, i) => {
+                    obj[h] = (vals[i] || '').trim();
+                });
+                return obj;
+            });
+        }
+
+        /**
+         * Split une ligne CSV en respectant les guillemets
+         */
+        function splitLine(line) {
+            const res = [];
+            let cur = '';
+            let inQ = false;
+            for (const c of line) {
+                if (c === '"') {
+                    inQ = !inQ;
+                } else if (c === ',' && !inQ) {
+                    res.push(cur);
+                    cur = '';
+                } else {
+                    cur += c;
+                }
+            }
+            return [...res, cur];
+        }
+
+        /**
+         * Applique l'import de délibération
+         * Validation, enrichissement des propriétés, mise à jour du GeoJSON
+         */
+        function applyImport(rows, filename) {
+            const REQUIRED = ['Departement', 'Espece', 'Lib_zone', 'Zone', 'Groupe'];
+            if (!rows.length) {
+                document.getElementById('import-status').textContent = '⚠ Fichier vide';
+                return;
+            }
+
+            // Vérifier les colonnes obligatoires
+            const missing = REQUIRED.filter(c => !(c in rows[0]));
+            if (missing.length) {
+                document.getElementById('import-status').textContent =
+                    `⚠ Colonnes manquantes : ${missing.join(', ')}`;
+                return;
+            }
+
+            // Construire une map zone → géométrie (du GeoJSON original)
+            const geomByZone = {};
+            for (const f of GEOJSON.features) {
+                if (f.properties.Espece !== 'Tellines') {
+                    geomByZone[f.properties.Zone] = f.geometry;
+                }
+            }
+
+            const newFeatures = [];
+            let count = 0, skipped = 0;
+
+            // Parser chaque ligne du CSV importé
+            for (const r of rows) {
+                const zone = (r.Zone || '').trim();
+                const espece = (r.Espece || '').trim();
+
+                // Ignorer les Tellines du CSV (elles restent celles du GeoJSON)
+                if (espece === 'Tellines') continue;
+                if (!zone) {
+                    skipped++;
+                    continue;
+                }
+
+                // Chercher la géométrie pour cette zone
+                const geom = geomByZone[zone];
+                if (!geom) {
+                    skipped++;
+                    continue;
+                }
+
+                // Créer la nouvelle feature
+                const groupe = (r.Groupe || '').trim();
+                newFeatures.push({
+                    type: 'Feature',
+                    geometry: geom,
+                    properties: {
+                        Departement: parseInt(r.Departement) || 0,
+                        Espece: espece,
+                        Lib_zone: (r.Lib_zone || '').trim(),
+                        Zone: zone,
+                        Groupe: groupe,
+                        Sanitaire: groupe === '-' ? 'P' : 'NC',  // Défaut simplifié
+                    }
+                });
+                count++;
+            }
+
+            // Reconstruire le GeoJSON : nouvelles features + Tellines originales
+            GEOJSON.features = newFeatures.concat(TELLINES_ORIG);
+            map.getSource('zones').setData(GEOJSON);
+
+            // Réinitialiser les filtres
+            depEl.value = especeEl.value = lieuEl.value = groupeEl.value = sanEl.value = 'all';
+            populateOptions();
+            applyFilters();
+
+            // Message de confirmation
+            const now = new Date().toLocaleString('fr-FR');
+            document.getElementById('import-status').textContent =
+                `✓ ${count} lignes (${skipped} ignorées) — ${now}`;
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // 9. LÉGENDE & MOBILE
+        // ────────────────────────────────────────────────────────────────────
+        document.getElementById('legend-header').addEventListener('click', () => {
+            const legend = document.getElementById('legend');
+            const toggle = document.getElementById('legend-toggle');
+            legend.classList.toggle('collapsed');
+            toggle.textContent = legend.classList.contains('collapsed') ? '▸' : '▾';
+        });
+
+        document.getElementById('mobile-toggle').addEventListener('click', () => {
+            document.getElementById('panel').classList.toggle('open');
+        });
+
+        // Redessiner la carte quand l'écran se redimensionne
+        window.addEventListener('resize', () => map.resize());
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => map.resize(), 300);
+        });
+    </script>
+</body>
+</html>
