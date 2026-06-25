@@ -1,0 +1,100 @@
+name: 🗺️ Générer GeoJSON PAP
+
+# ════════════════════════════════════════════════════════════════════════════
+# DÉCLENCHEURS
+# ════════════════════════════════════════════════════════════════════════════
+# Ce workflow se lance AUTOMATIQUEMENT quand :
+# 1. delib.csv change (modification délibération)
+# 2. tellines-f.geojson change (édition géométries tellines dans QGIS)
+# 3. Manuellement via Actions (bouton "Run workflow")
+# ════════════════════════════════════════════════════════════════════════════
+
+on:
+  push:
+    paths:
+      - 'data/delib.csv'
+      - 'data/tellines-f.geojson'
+      - 'scripts/generer_geojson.py'
+      - '.github/workflows/generate.yml'
+    branches:
+      - main
+  workflow_dispatch:  # Trigger manuel depuis l'onglet Actions
+
+jobs:
+  generate:
+    name: Générer GeoJSON
+    runs-on: ubuntu-latest
+    
+    steps:
+      # ────────────────────────────────────────────────────────────────────
+      # 1️⃣  CHECKOUT : récupère le code du repo
+      # ────────────────────────────────────────────────────────────────────
+      - name: 📥 Récupérer le repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # History complète (au cas où)
+      
+      # ────────────────────────────────────────────────────────────────────
+      # 2️⃣  PYTHON : configurer l'environnement Python
+      # ────────────────────────────────────────────────────────────────────
+      - name: 🐍 Configurer Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      # ────────────────────────────────────────────────────────────────────
+      # 3️⃣  DÉPENDANCES : installer les libs Python
+      # ────────────────────────────────────────────────────────────────────
+      - name: 📦 Installer dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install shapely
+      
+      # ────────────────────────────────────────────────────────────────────
+      # 4️⃣  GÉNÉRER : lancer le script principal
+      # ────────────────────────────────────────────────────────────────────
+      - name: 🔧 Générer GeoJSON
+        working-directory: ${{ github.workspace }}/scripts
+        run: python generer_geojson.py --verbose
+      
+      # ────────────────────────────────────────────────────────────────────
+      # 5️⃣  VÉRIFIER : s'assurer que le fichier a été créé
+      # ────────────────────────────────────────────────────────────────────
+      - name: ✅ Vérifier GeoJSON généré
+        run: |
+          if [ -f data/PAP_BZH.geojson ]; then
+            SIZE=$(wc -c < data/PAP_BZH.geojson)
+            FEATURES=$(grep -o '"type":"Feature"' data/PAP_BZH.geojson | wc -l)
+            echo "✓ GeoJSON généré: $SIZE bytes, $FEATURES features"
+          else
+            echo "❌ ERREUR: PAP_BZH.geojson non créé"
+            exit 1
+          fi
+      
+      # ────────────────────────────────────────────────────────────────────
+      # 6️⃣  GIT COMMIT : sauvegarder les changements automatiquement
+      # ────────────────────────────────────────────────────────────────────
+      - name: 💾 Commit changements
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: |
+            🔄 Regénération GeoJSON PAP
+            
+            - Mise à jour automatique du GeoJSON
+            - Features: $(grep -o '"type":"Feature"' data/PAP_BZH.geojson | wc -l)
+            - Déclenché par: ${{ github.event_name }}
+            - Source: ${{ github.sha }}
+          commit_options: '--no-verify'
+          file_pattern: 'data/PAP_BZH.geojson'
+          status_options: '--porcelain'
+          push_options: '--force-with-lease'
+      
+      # ────────────────────────────────────────────────────────────────────
+      # 7️⃣  NOTIFICATION : signal de succès/erreur (optionnel)
+      # ────────────────────────────────────────────────────────────────────
+      - name: 🚀 Workflow terminé
+        if: success()
+        run: |
+          echo "✅ Génération et push réussis"
+          echo "📍 La carte sera mise à jour sur GitHub Pages dans ~30 secondes"
