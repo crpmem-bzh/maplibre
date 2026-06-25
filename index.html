@@ -1027,6 +1027,8 @@
         document.getElementById('fondCarteSelect').addEventListener('change', function() {
             const isSat = this.value === 'satellite';
             const isBathy = this.value === 'bathy';
+            const isOsm = this.value === 'osm';
+            map.setLayoutProperty('osm-tiles', 'visibility', isOsm ? 'visible' : 'none');
             map.setLayoutProperty('satellite-layer', 'visibility', isSat ? 'visible' : 'none');
             map.setLayoutProperty('bathymetry-layer', 'visibility', isBathy ? 'visible' : 'none');
         });
