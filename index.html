@@ -707,7 +707,18 @@
         // ────────────────────────────────────────────────────────────────────
         const map = new maplibregl.Map({
             container: 'map',
-            style: 'https://openmaptiles.geo.data.gouv.fr/styles/osm-bright/style.json',
+            style: {
+                version: 8,
+                sources: {
+                    'osm': {
+                        type: 'raster',
+                        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                        tileSize: 256,
+                        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    }
+                },
+                layers: [{ id: 'osm-tiles', type: 'raster', source: 'osm' }]
+            },
             center: [-3.2458, 48.1585],  // Centre Bretagne
             zoom: window.innerWidth < 768 ? 6.8 : 7.5,
             minZoom: 6,
